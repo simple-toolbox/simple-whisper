@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  local exit_code="${1:-0}"
+  cat <<'EOF'
+simple-whisper - transcribe audio with whisper.cpp
+
+Usage: simple-whisper <audiofile>
+
+Outputs:
+  <audiofile>.raw.txt   Raw whisper.cpp transcript
+  <audiofile>.txt       Cleaned transcript (via simple-chatgpt)
+
+EOF
+  exit "$exit_code"
+}
+
+input=""
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage 0
+fi
+
+if [ $# -ne 1 ]; then
+  usage 1
+fi
+
+input="$1"
+
+tmpwav=""
+tmpprompt=""
+
+cleanup() {
+  [ -n "$tmpwav" ] && [ -f "$tmpwav" ] && rm -f "$tmpwav"
+  [ -n "$tmpprompt" ] && [ -f "$tmpprompt" ] && rm -f "$tmpprompt"
+}
+trap cleanup EXIT
+
+base="${input%.*}"   # preserves path; outputs <path>/<name>
+
+raw_base="${base}.raw"
+raw_transcript_file="${raw_base}.txt"
+clean_file="${base}.txt"
+model="$HOME/models/whisper/ggml-large-v3-turbo.bin"
+cli="$(command -v whisper-cli || echo /opt/homebrew/bin/whisper-cli)"
+
+# Resolve the real directory of this script even when invoked via PATH/symlink.
+script_path="${BASH_SOURCE[0]:-$0}"
+if resolved_path="$(command -v -- "$script_path" 2>/dev/null)"; then
+  script_path="$resolved_path"
+fi
+script_dir="$(cd -- "$(dirname "$script_path")" && pwd -P)"
+
+if ! command -v whisper-cli >/dev/null 2>&1 && [ ! -x "$cli" ]; then
+  echo "whisper-cli not found. Install whisper.cpp (brew install whisper-cpp) or ensure whisper-cli is on PATH."
+  exit 1
+fi
+
+if [ ! -f "$model" ]; then
+  echo "Model file not found at $model"
+  echo "Download it with scripts/download-model.sh"
+  exit 1
+fi
+
+prompt_file="$script_dir/prompt.txt"
+if [ ! -f "$prompt_file" ]; then
+  for prefix in "${HOMEBREW_PREFIX:-/opt/homebrew}" /usr/local; do
+    candidate="$prefix/share/simple-whisper/prompt.txt"
+    if [ -f "$candidate" ]; then
+      prompt_file="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ ! -f "$prompt_file" ]; then
+  echo "Prompt template not found. Ensure prompt.txt is next to the script or in Homebrew's share/simple-whisper directory."
+  exit 1
+fi
+
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "ffmpeg not found. Install with: brew install ffmpeg"
+  exit 1
+fi
+
+tmpwav="$(mktemp -t whisper-XXXXXX).wav"
+
+if ! ffmpeg -y -i "$input" -ar 16000 -ac 1 -c:a pcm_s16le "$tmpwav" >/dev/null 2>&1; then
+  echo "ffmpeg failed to read '$input'"
+  exit 1
+fi
+
+source_audio="$tmpwav"
+
+if ! "$cli" -m "$model" -l auto -otxt -of "$raw_base" "$source_audio"; then
+  echo "whisper-cli failed"
+  exit 1
+fi
+
+# At this point we expect "<base>.raw.txt" to exist
+if [ ! -f "$raw_transcript_file" ]; then
+  echo "Transcription file not found: $raw_transcript_file"
+  exit 1
+fi
+
+# Check simple-chatgpt CLI
+if ! command -v simple-chatgpt >/dev/null 2>&1; then
+  echo "simple-chatgpt command not found. Install with: brew install simple-toolbox/tools/simple-chatgpt"
+  exit 1
+fi
+
+# Build a temporary prompt file combining instructions + transcript
+tmpprompt="$(mktemp -t whisper-prompt-XXXXXX).txt"
+
+cat "$prompt_file" >"$tmpprompt"
+printf '\n' >>"$tmpprompt"
+cat "$raw_transcript_file" >>"$tmpprompt"
+
+# Use ChatGPT to polish the transcript
+if ! simple-chatgpt -f "$tmpprompt" -o "$clean_file"; then
+  echo "simple-chatgpt polishing failed"
+  rm -f "$tmpprompt"
+  exit 1
+fi
+
+rm -f "$tmpprompt"
+
+echo "Raw transcript : $raw_transcript_file"
+echo "Clean transcript: $clean_file"
+exit 0
