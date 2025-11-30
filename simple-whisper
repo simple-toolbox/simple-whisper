@@ -86,6 +86,7 @@ fi
 
 tmpwav="$(mktemp -t whisper-XXXXXX).wav"
 
+echo "Converting input audio to 16 kHz mono WAV..."
 if ! ffmpeg -y -i "$input" -ar 16000 -ac 1 -c:a pcm_s16le "$tmpwav" >/dev/null 2>&1; then
   echo "ffmpeg failed to read '$input'"
   exit 1
@@ -93,7 +94,10 @@ fi
 
 source_audio="$tmpwav"
 
-if ! "$cli" -m "$model" -l auto -otxt -of "$raw_base" "$source_audio"; then
+echo "Transcribing with whisper.cpp..."
+whisper_cmd=("$cli" -np -m "$model" -l auto -otxt -of "$raw_base" "$source_audio")
+if ! whisper_log="$("${whisper_cmd[@]}" 2>&1)"; then
+  printf '%s\n' "$whisper_log"
   echo "whisper-cli failed"
   exit 1
 fi
@@ -103,6 +107,8 @@ if [ ! -f "$raw_transcript_file" ]; then
   echo "Transcription file not found: $raw_transcript_file"
   exit 1
 fi
+
+echo "Raw transcript: $raw_transcript_file"
 
 # Check simple-chatgpt CLI
 if ! command -v simple-chatgpt >/dev/null 2>&1; then
@@ -118,6 +124,7 @@ printf '\n' >>"$tmpprompt"
 cat "$raw_transcript_file" >>"$tmpprompt"
 
 # Use ChatGPT to polish the transcript
+echo "Cleaning transcript with simple-chatgpt..."
 if ! simple-chatgpt -f "$tmpprompt" -o "$clean_file"; then
   echo "simple-chatgpt polishing failed"
   rm -f "$tmpprompt"
@@ -126,6 +133,6 @@ fi
 
 rm -f "$tmpprompt"
 
-echo "Raw transcript : $raw_transcript_file"
 echo "Clean transcript: $clean_file"
+
 exit 0
