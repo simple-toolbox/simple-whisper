@@ -32,4 +32,4 @@ simple-whisper voice_note.m4a
 
 ## Disclaimer
 
-Whisper is an open-source speech-recognition model released by OpenAI. This utility is an independent project and is not affiliated with or endorsed by OpenAI.
+simple-whisper is a thin wrapper: whisper.cpp's `whisper-cli` (GGML) does the transcription, and simple-chatgpt cleans it up. Credit belongs to those projects; this repo is not affiliated with OpenAI, whisper.cpp, or the GGML maintainers.
