@@ -102,7 +102,6 @@ if ! whisper_log="$("${whisper_cmd[@]}" 2>&1)"; then
   exit 1
 fi
 
-# At this point we expect "<base>.raw.txt" to exist
 if [ ! -f "$raw_transcript_file" ]; then
   echo "Transcription file not found: $raw_transcript_file"
   exit 1
@@ -110,7 +109,6 @@ fi
 
 echo "Raw transcript: $raw_transcript_file"
 
-# Check simple-chatgpt CLI
 if ! command -v simple-chatgpt >/dev/null 2>&1; then
   echo "simple-chatgpt command not found. Install with: brew install simple-toolbox/tools/simple-chatgpt"
   exit 1
@@ -118,12 +116,10 @@ fi
 
 # Build a temporary prompt file combining instructions + transcript
 tmpprompt="$(mktemp -t whisper-prompt-XXXXXX).txt"
-
 cat "$prompt_file" >"$tmpprompt"
 printf '\n' >>"$tmpprompt"
 cat "$raw_transcript_file" >>"$tmpprompt"
 
-# Use ChatGPT to polish the transcript
 echo "Cleaning transcript with simple-chatgpt..."
 if ! simple-chatgpt -f "$tmpprompt" -o "$clean_file"; then
   echo "simple-chatgpt polishing failed"
