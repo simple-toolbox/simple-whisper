@@ -123,11 +123,11 @@ cat "$raw_transcript_file" >>"$tmpprompt"
 echo "Cleaning transcript with simple-chatgpt..."
 if ! simple-chatgpt -f "$tmpprompt" -o "$clean_file"; then
   echo "simple-chatgpt polishing failed"
-  rm -f "$tmpprompt"
   exit 1
 fi
 
-rm -f "$tmpprompt"
+trap - EXIT
+cleanup
 
 echo "Clean transcript: $clean_file"
 
