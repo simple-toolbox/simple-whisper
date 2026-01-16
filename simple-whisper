@@ -6,20 +6,28 @@ usage() {
   cat <<'EOF'
 simple-whisper - transcribe audio with whisper.cpp
 
-Usage: simple-whisper <audiofile>
+Usage: simple-whisper [--clean] <audiofile>
+
+Options:
+  --clean    Polish the transcript with simple-chatgpt (requires simple-chatgpt)
 
 Outputs:
-  <audiofile>.raw.txt   Raw whisper.cpp transcript
-  <audiofile>.txt       Cleaned transcript (via simple-chatgpt)
+  <audiofile>.txt       Transcript (raw by default, cleaned with --clean)
 
 EOF
   exit "$exit_code"
 }
 
 input=""
+clean_flag=false
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   usage 0
+fi
+
+if [ "${1:-}" = "--clean" ]; then
+  clean_flag=true
+  shift
 fi
 
 if [ $# -ne 1 ]; then
@@ -39,9 +47,15 @@ trap cleanup EXIT
 
 base="${input%.*}"   # preserves path; outputs <path>/<name>
 
-raw_base="${base}.raw"
-raw_transcript_file="${raw_base}.txt"
-clean_file="${base}.txt"
+if [ "$clean_flag" = true ]; then
+  raw_base="${base}.raw"
+  raw_transcript_file="${raw_base}.txt"
+  output_file="${base}.txt"
+else
+  raw_base="${base}"
+  raw_transcript_file="${base}.txt"
+  output_file="${base}.txt"
+fi
 model="$HOME/models/whisper/ggml-large-v3-turbo.bin"
 cli="$(command -v whisper-cli || echo /opt/homebrew/bin/whisper-cli)"
 
@@ -107,8 +121,14 @@ if [ ! -f "$raw_transcript_file" ]; then
   exit 1
 fi
 
-echo "Raw transcript: $raw_transcript_file"
+if [ "$clean_flag" = false ]; then
+  echo "Transcript: $raw_transcript_file"
+  trap - EXIT
+  cleanup
+  exit 0
+fi
 
+# Clean mode: polish with simple-chatgpt
 if ! command -v simple-chatgpt >/dev/null 2>&1; then
   echo "simple-chatgpt command not found. Install with: brew install simple-toolbox/tools/simple-chatgpt"
   exit 1
@@ -121,14 +141,17 @@ printf '\n' >>"$tmpprompt"
 cat "$raw_transcript_file" >>"$tmpprompt"
 
 echo "Cleaning transcript with simple-chatgpt..."
-if ! simple-chatgpt -f "$tmpprompt" -o "$clean_file"; then
-  echo "simple-chatgpt polishing failed"
+if ! simple-chatgpt -f "$tmpprompt" -o "$output_file"; then
+  echo "simple-chatgpt polishing failed (raw transcript preserved at: $raw_transcript_file)"
   exit 1
 fi
+
+# Delete the raw intermediate file after successful cleaning
+rm -f "$raw_transcript_file"
 
 trap - EXIT
 cleanup
 
-echo "Clean transcript: $clean_file"
+echo "Cleaned transcript: $output_file"
 
 exit 0
